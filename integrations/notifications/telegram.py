@@ -1,134 +1,312 @@
 import requests
 from loguru import logger
-
 from integrations.notifications.base import Notifier
 from integrations.notifications.transport import send_with_retries
-from integrations.notifications.utils import get_first_image
 from models import Item
 
 
 class TelegramNotifier(Notifier):
-    def __init__(self, bot_token: str, chat_id: str, proxy: str = None, only_text: bool = False):
+    def __init__(
+        self,
+        bot_token: str,
+        chat_id: str,
+        proxy: str = None,
+        only_text: bool = False
+    ):
         self.bot_token = bot_token
         self.chat_id = chat_id
-        self.proxy = self.get_proxy(proxy=proxy)
+        self.proxy = self._get_proxy(proxy=proxy)
         self.only_text = only_text
 
     @staticmethod
-    def get_proxy(proxy: str = None):
+    def _get_proxy(proxy: str = None) -> dict | None:
         if proxy:
             return {
-            'http': f'http://{proxy}',
-            'https': f'http://{proxy}'
-        }
+                "http": f"http://{proxy}",
+                "https": f"http://{proxy}",
+            }
         return None
 
-    def notify_message(self, message: str):
-        def _send():
-            return requests.post(
-                f"https://api.telegram.org/bot{self.bot_token}/sendMessage",
-                json={
-                    "chat_id": self.chat_id,
-                    "text": message,
-                    "parse_mode": "MarkdownV2",
-                },
-                proxies=self.proxy,
-                timeout=10,
+    def _api(self, method: str) -> str:
+        return (
+            f"https://api.telegram.org/"
+            f"bot{self.bot_token}/{method}"
+        )
+
+    @staticmethod
+    def _collect_photos(ad: Item) -> list[str]:
+        """
+        Собирает все ссылки на фото из объявления
+        Пробует три источника по приоритету
+        """
+        photos = []
+
+        # Источник 1 — большие фото из галереи
+        if ad.gallery and ad.gallery.image_large_urls:
+            for url in ad.gallery.image_large_urls:
+                url_str = str(url) if url else None
+                if url_str and url_str not in photos:
+                    photos.append(url_str)
+
+        # Источник 2 — список images
+        if not photos and ad.images:
+            for image_obj in ad.images:
+                if image_obj and image_obj.root:
+                    best_url = None
+                    best_size = 0
+                    for size_key, url in image_obj.root.items():
+                        try:
+                            parts = size_key.split("x")
+                            if len(parts) == 2:
+                                size = (
+                                    int(parts[0]) * int(parts[1])
+                                )
+                                if size > best_size:
+                                    best_size = size
+                                    best_url = str(url)
+                        except (ValueError, AttributeError):
+                            best_url = str(url)
+                    if best_url and best_url not in photos:
+                        photos.append(best_url)
+
+        # Источник 3 — одно большое фото
+        if not photos:
+            if ad.gallery and ad.gallery.imageLargeUrl:
+                photos.append(str(ad.gallery.imageLargeUrl))
+
+        return photos[:20]
+
+    @staticmethod
+    def _escape(text: str) -> str:
+        """
+        Экранирует спецсимволы для MarkdownV2
+        Без этого Telegram выдаёт ошибку
+        """
+        if not text:
+            return ""
+        special = r"\_*[]()~`>#+-=|{}.!"
+        for ch in special:
+            text = text.replace(ch, f"\\{ch}")
+        return text
+
+    def format(self, ad: Item) -> str:
+        """
+        Формирует текст сообщения
+        Содержит все данные объявления
+        """
+
+        # Заголовок
+        title = self._escape(ad.title or "Без названия")
+
+        # Цена
+        price = ""
+        if ad.priceDetailed:
+            price = self._escape(
+                ad.priceDetailed.string
+                or str(ad.priceDetailed.value)
             )
 
-        send_with_retries(_send)
+        # Адрес
+        address = ""
+        if ad.geo and ad.geo.formattedAddress:
+            address = self._escape(ad.geo.formattedAddress)
+        elif (
+            ad.addressDetailed
+            and ad.addressDetailed.locationName
+        ):
+            address = self._escape(
+                ad.addressDetailed.locationName
+            )
 
-    def _send_text_fallback(self, message: str) -> None:
+        # Описание до 800 символов
+        description = ""
+        if ad.description:
+            desc_raw = ad.description[:800]
+            if len(ad.description) > 800:
+                desc_raw += "..."
+            description = self._escape(desc_raw)
+
+        # Продавец
+        seller = self._escape(ad.sellerId or "Не указан")
+
+        # Ссылка
+        url = ""
+        if ad.urlPath:
+            url = f"https://www.avito.ru{ad.urlPath}"
+
+        # Количество фото
+        photos_count = ad.imagesCount or 0
+
+        # Собираем сообщение по блокам
+        lines = []
+
+        lines.append(f"*{title}*")
+        lines.append("")
+
+        if price:
+            lines.append(f"💰 *{price}*")
+        if address:
+            lines.append(f"📍 {address}")
+        if seller:
+            lines.append(f"👤 Продавец: {seller}")
+        if photos_count:
+            lines.append(f"📸 Фото: {photos_count} шт\\.")
+
+        if description:
+            lines.append("")
+            lines.append("📝 *Описание:*")
+            lines.append(description)
+
+        if url:
+            lines.append("")
+            lines.append(f"🔗 [Открыть объявление]({url})")
+
+        return "\n".join(lines)
+
+    def _send_text(self, text: str) -> None:
+        """Отправляет текстовое сообщение"""
         def _send():
             return requests.post(
-                f"https://api.telegram.org/bot{self.bot_token}/sendMessage",
+                self._api("sendMessage"),
                 json={
                     "chat_id": self.chat_id,
-                    "text": message,
+                    "text": text,
                     "parse_mode": "MarkdownV2",
                     "disable_web_page_preview": True,
                 },
                 proxies=self.proxy,
                 timeout=10,
             )
-
         send_with_retries(_send)
 
-    def _send_photo_bytes(self, image_url: str, message: str) -> bool:
-        """Download the image locally and re-upload to Telegram as multipart.
+    def _send_single_photo(
+        self,
+        photo_url: str,
+        caption: str
+    ) -> None:
+        """Отправляет одно фото с подписью"""
+        def _send():
+            return requests.post(
+                self._api("sendPhoto"),
+                json={
+                    "chat_id": self.chat_id,
+                    "photo": photo_url,
+                    "caption": caption[:1024],
+                    "parse_mode": "MarkdownV2",
+                },
+                proxies=self.proxy,
+                timeout=15,
+            )
+        send_with_retries(_send)
 
-        Returns True on success, False if the image could not be downloaded.
-        """
-        try:
-            img_resp = requests.get(image_url, proxies=self.proxy, timeout=15)
-            img_resp.raise_for_status()
-            image_bytes = img_resp.content
-        except requests.RequestException as e:
-            logger.warning(f"[notify] could not download image for multipart upload: {e}")
-            return False
+    def _send_media_group(
+        self,
+        photos: list[str],
+        caption: str = ""
+    ) -> None:
+        """Отправляет альбом до 10 фото"""
+        if not photos:
+            return
+
+        media = []
+        for i, photo_url in enumerate(photos):
+            item = {
+                "type": "photo",
+                "media": photo_url
+            }
+            if i == 0 and caption:
+                item["caption"] = caption[:1024]
+                item["parse_mode"] = "MarkdownV2"
+            media.append(item)
 
         def _send():
             return requests.post(
-                f"https://api.telegram.org/bot{self.bot_token}/sendPhoto",
-                data={
+                self._api("sendMediaGroup"),
+                json={
                     "chat_id": self.chat_id,
-                    "caption": message,
-                    "parse_mode": "MarkdownV2",
+                    "media": media,
                 },
-                files={"photo": ("photo.jpg", image_bytes, "image/jpeg")},
                 proxies=self.proxy,
                 timeout=30,
             )
-
         send_with_retries(_send)
-        return True
 
-    def notify_ad(self, ad: Item):
-        message = self.format(ad)
+    def _send_all_photos(
+        self,
+        photos: list[str],
+        caption: str
+    ) -> None:
+        """
+        Отправляет все фото альбомами по 10
+        Первый альбом с подписью текста
+        """
+        if not photos:
+            self._send_text(caption)
+            return
 
-        def _send():
-            if self.only_text:
-                return requests.post(
-                    f"https://api.telegram.org/bot{self.bot_token}/sendMessage",
-                    json={
-                        "chat_id": self.chat_id,
-                        "text": message,
-                        "parse_mode": "MarkdownV2",
-                        "disable_web_page_preview": True,
-                    },
-                    proxies=self.proxy,
-                    timeout=10,
+        if len(photos) == 1:
+            self._send_single_photo(
+                photo_url=photos[0],
+                caption=caption
+            )
+            return
+
+        # Разбиваем на группы по 10
+        chunks = [
+            photos[i:i + 10]
+            for i in range(0, len(photos), 10)
+        ]
+
+        for index, chunk in enumerate(chunks):
+            album_caption = caption if index == 0 else ""
+
+            if len(chunk) == 1:
+                self._send_single_photo(
+                    photo_url=chunk[0],
+                    caption=album_caption
+                )
+            else:
+                self._send_media_group(
+                    photos=chunk,
+                    caption=album_caption
                 )
 
-            return requests.post(
-                f"https://api.telegram.org/bot{self.bot_token}/sendPhoto",
-                json={
-                    "chat_id": self.chat_id,
-                    "caption": message,
-                    "photo": get_first_image(ad=ad),
-                    "parse_mode": "MarkdownV2",
-                    "disable_web_page_preview": True,
-                },
-                proxies=self.proxy,
-                timeout=10,
+    def notify_ad(self, ad: Item) -> None:
+        """Главный метод — отправляет объявление"""
+        try:
+            message = self.format(ad)
+
+            if self.only_text:
+                self._send_text(message)
+                return
+
+            photos = self._collect_photos(ad)
+
+            logger.info(
+                f"Отправляю {ad.id} | "
+                f"фото: {len(photos)} | "
+                f"{ad.title}"
             )
 
-        try:
-            send_with_retries(_send)
-        except requests.HTTPError as e:
-            resp = e.response
-            if not self.only_text and resp is not None and resp.status_code == 400:
-                image_url = get_first_image(ad=ad)
-                if image_url:
-                    logger.info("[notify] sendPhoto URL rejected (400), retrying with image bytes")
-                    uploaded = self._send_photo_bytes(image_url=image_url, message=message)
-                    if not uploaded:
-                        logger.warning("[notify] multipart upload also failed, falling back to text-only")
-                        self._send_text_fallback(message=message)
-                    return
-            raise
+            self._send_all_photos(
+                photos=photos,
+                caption=message
+            )
 
-    def notify(self, ad: Item = None, message: str = None):
+        except Exception as err:
+            logger.error(
+                f"Ошибка отправки {ad.id}: {err}"
+            )
+
+    def notify_message(self, message: str) -> None:
+        self._send_text(message)
+
+    def notify(
+        self,
+        ad: Item = None,
+        message: str = None
+    ) -> None:
         if ad:
             return self.notify_ad(ad=ad)
-        return self.notify_message(message=message)
+        if message:
+            return self.notify_message(message=message)
