@@ -35,20 +35,14 @@ class TelegramNotifier(Notifier):
 
     @staticmethod
     def _collect_photos(ad: Item) -> list[str]:
-        """
-        Собирает все ссылки на фото из объявления
-        Пробует три источника по приоритету
-        """
         photos = []
 
-        # Источник 1 — большие фото из галереи
         if ad.gallery and ad.gallery.image_large_urls:
             for url in ad.gallery.image_large_urls:
                 url_str = str(url) if url else None
                 if url_str and url_str not in photos:
                     photos.append(url_str)
 
-        # Источник 2 — список images
         if not photos and ad.images:
             for image_obj in ad.images:
                 if image_obj and image_obj.root:
@@ -58,9 +52,7 @@ class TelegramNotifier(Notifier):
                         try:
                             parts = size_key.split("x")
                             if len(parts) == 2:
-                                size = (
-                                    int(parts[0]) * int(parts[1])
-                                )
+                                size = int(parts[0]) * int(parts[1])
                                 if size > best_size:
                                     best_size = size
                                     best_url = str(url)
@@ -69,109 +61,79 @@ class TelegramNotifier(Notifier):
                     if best_url and best_url not in photos:
                         photos.append(best_url)
 
-        # Источник 3 — одно большое фото
         if not photos:
             if ad.gallery and ad.gallery.imageLargeUrl:
                 photos.append(str(ad.gallery.imageLargeUrl))
 
         return photos[:20]
 
-    @staticmethod
-    def _escape(text: str) -> str:
-        """
-        Экранирует спецсимволы для MarkdownV2
-        Без этого Telegram выдаёт ошибку
-        """
-        if not text:
-            return ""
-        special = r"\_*[]()~`>#+-=|{}.!"
-        for ch in special:
-            text = text.replace(ch, f"\\{ch}")
-        return text
-
     def format(self, ad: Item) -> str:
         """
-        Формирует текст сообщения
-        Содержит все данные объявления
+        Простой текст без MarkdownV2
+        Работает всегда без ошибок
         """
 
+        lines = []
+
         # Заголовок
-        title = self._escape(ad.title or "Без названия")
+        title = ad.title or "Без названия"
+        lines.append(f"📌 {title}")
+        lines.append("")
 
         # Цена
-        price = ""
         if ad.priceDetailed:
-            price = self._escape(
+            price = (
                 ad.priceDetailed.string
                 or str(ad.priceDetailed.value)
             )
+            lines.append(f"💰 Цена: {price}")
 
         # Адрес
         address = ""
         if ad.geo and ad.geo.formattedAddress:
-            address = self._escape(ad.geo.formattedAddress)
+            address = ad.geo.formattedAddress
         elif (
             ad.addressDetailed
             and ad.addressDetailed.locationName
         ):
-            address = self._escape(
-                ad.addressDetailed.locationName
-            )
+            address = ad.addressDetailed.locationName
 
-        # Описание до 800 символов
-        description = ""
-        if ad.description:
-            desc_raw = ad.description[:800]
-            if len(ad.description) > 800:
-                desc_raw += "..."
-            description = self._escape(desc_raw)
+        if address:
+            lines.append(f"📍 Адрес: {address}")
 
         # Продавец
-        seller = self._escape(ad.sellerId or "Не указан")
-
-        # Ссылка
-        url = ""
-        if ad.urlPath:
-            url = f"https://www.avito.ru{ad.urlPath}"
+        if ad.sellerId:
+            lines.append(f"👤 Продавец: {ad.sellerId}")
 
         # Количество фото
-        photos_count = ad.imagesCount or 0
+        if ad.imagesCount:
+            lines.append(f"📸 Фото: {ad.imagesCount} шт.")
 
-        # Собираем сообщение по блокам
-        lines = []
-
-        lines.append(f"*{title}*")
-        lines.append("")
-
-        if price:
-            lines.append(f"💰 *{price}*")
-        if address:
-            lines.append(f"📍 {address}")
-        if seller:
-            lines.append(f"👤 Продавец: {seller}")
-        if photos_count:
-            lines.append(f"📸 Фото: {photos_count} шт\\.")
-
-        if description:
+        # Описание
+        if ad.description:
+            desc = ad.description[:800]
+            if len(ad.description) > 800:
+                desc += "..."
             lines.append("")
-            lines.append("📝 *Описание:*")
-            lines.append(description)
+            lines.append("📝 Описание:")
+            lines.append(desc)
 
-        if url:
+        # Ссылка
+        if ad.urlPath:
+            url = f"https://www.avito.ru{ad.urlPath}"
             lines.append("")
-            lines.append(f"🔗 [Открыть объявление]({url})")
+            lines.append(f"🔗 {url}")
 
         return "\n".join(lines)
 
     def _send_text(self, text: str) -> None:
-        """Отправляет текстовое сообщение"""
+        """Отправляет текст без форматирования"""
         def _send():
             return requests.post(
                 self._api("sendMessage"),
                 json={
                     "chat_id": self.chat_id,
                     "text": text,
-                    "parse_mode": "MarkdownV2",
                     "disable_web_page_preview": True,
                 },
                 proxies=self.proxy,
@@ -192,7 +154,6 @@ class TelegramNotifier(Notifier):
                     "chat_id": self.chat_id,
                     "photo": photo_url,
                     "caption": caption[:1024],
-                    "parse_mode": "MarkdownV2",
                 },
                 proxies=self.proxy,
                 timeout=15,
@@ -216,7 +177,6 @@ class TelegramNotifier(Notifier):
             }
             if i == 0 and caption:
                 item["caption"] = caption[:1024]
-                item["parse_mode"] = "MarkdownV2"
             media.append(item)
 
         def _send():
@@ -236,10 +196,7 @@ class TelegramNotifier(Notifier):
         photos: list[str],
         caption: str
     ) -> None:
-        """
-        Отправляет все фото альбомами по 10
-        Первый альбом с подписью текста
-        """
+        """Все фото альбомами по 10"""
         if not photos:
             self._send_text(caption)
             return
@@ -251,7 +208,6 @@ class TelegramNotifier(Notifier):
             )
             return
 
-        # Разбиваем на группы по 10
         chunks = [
             photos[i:i + 10]
             for i in range(0, len(photos), 10)
@@ -272,7 +228,6 @@ class TelegramNotifier(Notifier):
                 )
 
     def notify_ad(self, ad: Item) -> None:
-        """Главный метод — отправляет объявление"""
         try:
             message = self.format(ad)
 

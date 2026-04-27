@@ -1,7 +1,10 @@
 # created by virtualenv automatically
 .secret.txt
-config.toml
 logs/
 __pycache__/
 *.pyc
 result/
+database.db
+storage/
+*.json
+cookies/

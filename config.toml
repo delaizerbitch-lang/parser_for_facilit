@@ -1,0 +1,40 @@
+[avito]
+tg_token = ""
+tg_chat_id = []
+vk_token = ""
+vk_user_id = []
+urls = [
+    "https://www.avito.ru/moskva/kommercheskaya_nedvizhimost/sdam"
+]
+count = 1
+keys_word_white_list = []
+keys_word_black_list = [
+    "подвал",
+    "цокольный"
+]
+seller_black_list = []
+max_price = 600000
+min_price = 60000
+geo = ""
+proxy_string = ""
+proxy_change_url = ""
+pause_general = 60
+pause_between_links = 3
+max_age = 86400
+max_count_of_retry = 5
+ignore_reserv = true
+ignore_promotion = false
+one_time_start = false
+one_file_for_link = true
+parse_views = false
+save_xlsx = false
+use_webdriver = false
+use_bypass_api = true
+cookies_api_key = ""
+use_own_cookies = false
+parse_phone = false
+proxy_notifier = ""
+tg_only_text = false
+retry_delay = 5
+timeout = 20
+block_threshold = 3
