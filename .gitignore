@@ -9,8 +9,6 @@ database.db
 storage/
 *.json
 cookies/
-
-# ВАЖНО — секреты не заливаем на GitHub!
 config.toml
 .env
 *.db
