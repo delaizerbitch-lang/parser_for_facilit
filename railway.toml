@@ -1,6 +1,6 @@
 [build]
-builder = "nixpacks"
+builder = "dockerfile"
 
 [deploy]
-startCommand = "py -3.11 parser_cls.py"
+startCommand = "python parser_cls.py"
 restartPolicyType = "on_failure"
