@@ -5,7 +5,6 @@ __pycache__/
 *.pyc
 *.pyo
 result/
-database.db
 config.toml
 storage/
 *.json
