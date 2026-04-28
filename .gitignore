@@ -6,9 +6,9 @@ __pycache__/
 *.pyo
 result/
 database.db
+config.toml
 storage/
 *.json
 cookies/
-.config.toml
 .env
 *.db
