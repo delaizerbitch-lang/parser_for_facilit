@@ -1,26 +1,23 @@
 [avito]
-tg_token = ""
-tg_chat_id = []
+tg_token = "8698586206:AAFHSY1JG0k_idhGBY9smkGJk_pW4Y4golg"
+tg_chat_id = [784252401]
 vk_token = ""
 vk_user_id = []
 urls = [
-    "https://www.avito.ru/moskva/kommercheskaya_nedvizhimost/sdam"
+    "https://www.avito.ru/moskva/kommercheskaya_nedvizhimost/sdam/drugoe-ASgBAgICAkSwCNRWnsMNhtk5?context=H4sIAAAAAAAA_wEmANn_YToxOntzOjE6InkiO3M6MTY6IlhYeVJjVjdqZUh5Sm9lTzUiO307GBawJgAAAA&f=ASgBAgICA0SwCNRW9BKk2gGeww2G2Tk&localPriority=0"
 ]
 count = 1
 keys_word_white_list = []
-keys_word_black_list = [
-    "подвал",
-    "цокольный"
-]
+keys_word_black_list = []
 seller_black_list = []
-max_price = 600000
-min_price = 60000
+max_price = 99999999
+min_price = 0
 geo = ""
 proxy_string = ""
 proxy_change_url = ""
 pause_general = 60
 pause_between_links = 3
-max_age = 86400
+max_age = 0
 max_count_of_retry = 5
 ignore_reserv = true
 ignore_promotion = false
@@ -30,7 +27,7 @@ parse_views = false
 save_xlsx = false
 use_webdriver = false
 use_bypass_api = true
-cookies_api_key = ""
+cookies_api_key = "sk_live_SHpFGbVszAMPVCXhs-o8V5MvKKezcv-WYtn4LtZPS-I"
 use_own_cookies = false
 parse_phone = false
 proxy_notifier = ""

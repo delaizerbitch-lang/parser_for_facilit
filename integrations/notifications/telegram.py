@@ -1,5 +1,7 @@
 import requests
 from loguru import logger
+from datetime import datetime, timezone
+
 from integrations.notifications.base import Notifier
 from integrations.notifications.transport import send_with_retries
 from models import Item
@@ -67,12 +69,54 @@ class TelegramNotifier(Notifier):
 
         return photos[:20]
 
+    @staticmethod
+    def _get_age_string(ad: Item) -> str:
+        """
+        Считает возраст объявления через sortTimeStamp.
+        sortTimeStamp — это миллисекунды (13 цифр).
+        """
+        try:
+            if not ad.sortTimeStamp:
+                return ""
+
+            ts = ad.sortTimeStamp
+
+            # Авито хранит время в миллисекундах — делим на 1000
+            if ts > 1_000_000_000_000:
+                ts = ts / 1000
+
+            dt = datetime.fromtimestamp(ts, tz=timezone.utc)
+            now = datetime.now(tz=timezone.utc)
+            delta = now - dt
+            days = delta.days
+
+            if days == 0:
+                hours = delta.seconds // 3600
+                if hours == 0:
+                    minutes = delta.seconds // 60
+                    return f"🕐 Опубликовано: {minutes} мин. назад"
+                return f"🕐 Опубликовано: {hours} ч. назад"
+            elif days == 1:
+                return "🕐 Опубликовано: вчера"
+            elif days < 7:
+                return f"🕐 Опубликовано: {days} дн. назад"
+            elif days < 30:
+                weeks = days // 7
+                return f"🕐 Опубликовано: {weeks} нед. назад"
+            else:
+                months = days // 30
+                return f"🕐 Опубликовано: {months} мес. назад"
+
+        except Exception:
+            return ""
+
     def format(self, ad: Item) -> str:
         """
-        Простой текст без MarkdownV2
-        Работает всегда без ошибок
+        Формирует сообщение для Telegram.
+        Показывает: название, цена, адрес, возраст,
+        параметры помещения, продавец, ссылка.
+        Описание НЕ показываем.
         """
-
         lines = []
 
         # Заголовок
@@ -101,22 +145,39 @@ class TelegramNotifier(Notifier):
         if address:
             lines.append(f"📍 Адрес: {address}")
 
+        # Возраст объявления
+        age_str = self._get_age_string(ad)
+        if age_str:
+            lines.append(age_str)
+
+        # Параметры помещения
+        # Они кладутся в ad.params парсером avito_params_parser.py
+        if hasattr(ad, 'params') and ad.params:
+            lines.append("")
+            lines.append("🏢 О помещении:")
+            if isinstance(ad.params, dict):
+                for key, value in ad.params.items():
+                    lines.append(f"  • {key}: {value}")
+            elif isinstance(ad.params, list):
+                for param in ad.params:
+                    if isinstance(param, dict):
+                        key = param.get('title') or param.get('name') or ''
+                        value = param.get('value') or ''
+                        if isinstance(value, dict):
+                            value = value.get('title') or str(value)
+                        if key:
+                            lines.append(f"  • {key}: {value}")
+                    else:
+                        lines.append(f"  • {param}")
+
         # Продавец
         if ad.sellerId:
+            lines.append("")
             lines.append(f"👤 Продавец: {ad.sellerId}")
 
         # Количество фото
         if ad.imagesCount:
             lines.append(f"📸 Фото: {ad.imagesCount} шт.")
-
-        # Описание
-        if ad.description:
-            desc = ad.description[:800]
-            if len(ad.description) > 800:
-                desc += "..."
-            lines.append("")
-            lines.append("📝 Описание:")
-            lines.append(desc)
 
         # Ссылка
         if ad.urlPath:

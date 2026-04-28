@@ -149,6 +149,11 @@ class Item(BaseModel):
     today_views: int | None = None
     phone: str | None = None
 
+    # ✅ НОВОЕ ПОЛЕ — параметры помещения
+    # Заполняется в parser_cls.py через avito_params_parser.py
+    # Пример: {"Этаж": "1", "Площадь": "112 м²", "Отделка": "офисная"}
+    params: Dict[str, str] | None = None
+
 
 class ItemsResponse(BaseModel):
     items: List[Item]

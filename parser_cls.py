@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup
 from loguru import logger
 from pydantic import ValidationError
 
+from avito_params_parser import get_avito_params
 from common_data import HEADERS
 from db_service import SQLiteDBHandler
 from dto import Proxy, AvitoConfig
@@ -56,7 +57,6 @@ class AvitoParse:
         self.ads_filter = AdsFilter(config=config, is_viewed_fn=self.is_viewed)
         log_config(config=self.config, version=VERSION)
 
-
     def get_proxy_obj(self) -> Proxy | None:
         if all([self.config.proxy_string, self.config.proxy_change_url]):
             return Proxy(
@@ -97,15 +97,69 @@ class AvitoParse:
 
         return response.json()
 
+    def _get_proxy_for_requests(self) -> dict | None:
+        """
+        Возвращает прокси в формате для библиотеки requests.
+        Используется в avito_params_parser.
+        """
+        if self.config.proxy_string:
+            return {
+                "http": f"http://{self.config.proxy_string}",
+                "https": f"http://{self.config.proxy_string}",
+            }
+        return None
+
+    def parse_ad_params(self, ads: list[Item]) -> list[Item]:
+        """
+        Для каждого объявления открывает его страницу
+        и собирает параметры помещения (этаж, площадь и т.д.)
+        Результат записывает в ad.params
+        """
+        proxy = self._get_proxy_for_requests()
+
+        for ad in ads:
+            try:
+                if not ad.urlPath:
+                    continue
+
+                logger.info(
+                    f"Парсю параметры для: {ad.title}"
+                )
+
+                params = get_avito_params(
+                    url_path=ad.urlPath,
+                    proxy=proxy
+                )
+
+                if params:
+                    ad.params = params
+                    logger.info(
+                        f"Параметры найдены: {list(params.keys())}"
+                    )
+                else:
+                    logger.warning(
+                        f"Параметры не найдены для {ad.urlPath}"
+                    )
+
+                # Небольшая пауза чтобы не словить бан
+                delay = random.uniform(1.0, 2.5)
+                time.sleep(delay)
+
+            except Exception as err:
+                logger.warning(
+                    f"Ошибка при парсинге параметров {ad.urlPath}: {err}"
+                )
+                continue
+
+        return ads
+
     def parse(self):
         if not self.config.one_file_for_link:
-            # один storage на весь парсинг
             self.result_storage = build_result_storage(config=self.config)
 
         for _index, url in enumerate(self.config.urls):
 
             if self.config.one_file_for_link:
-                # storage для этой ссылки
                 self.result_storage = build_result_storage(
                     config=self.config,
                     link_index=_index
@@ -141,7 +195,6 @@ class AvitoParse:
                 if i == 0:
                     search_core = data_from_page.get("searchCore") or {}
                     context = data_from_page.get("context")
-
                     api_params = build_api_params(search_core)
 
                 try:
@@ -160,7 +213,6 @@ class AvitoParse:
                 logger.info(f"Объявлений перед чисткой {len(ads)}")
 
                 ads = self._add_seller_to_ads(ads=ads)
-
                 ads = self._add_promotion_to_ads(ads=ads)
 
                 if not ads:
@@ -169,6 +221,15 @@ class AvitoParse:
 
                 filter_ads = self.filter_ads(ads=ads)
 
+                # ✅ НОВОЕ: парсим параметры помещения для каждого объявления
+                # Делаем это ДО отправки в Telegram
+                if filter_ads:
+                    logger.info(
+                        f"Парсю параметры помещений для {len(filter_ads)} объявлений..."
+                    )
+                    filter_ads = self.parse_ad_params(ads=filter_ads)
+
+                # Отправляем в Telegram (теперь с параметрами)
                 self.notifier.notify_many(ads=filter_ads)
 
                 # Просмотры
@@ -206,7 +267,6 @@ class AvitoParse:
         html_code = BeautifulSoup(html_code, "html.parser")
         try:
             for _script in html_code.select('script'):
-
                 script_type = _script.get('type')
 
                 if data_type == 'mime':
@@ -220,7 +280,6 @@ class AvitoParse:
             logger.error(f"Ошибка при поиске информации на странице: {err}")
         logger.warning("not found json")
         return {}
-
 
     def filter_ads(self, ads: list[Item]) -> list[Item]:
         return self.ads_filter.apply(ads)
@@ -263,7 +322,6 @@ class AvitoParse:
 
     def parse_phone(self, ads: list[Item]) -> list[Item]:
         if not self.config.parse_phone or self.config.parse_phone:
-            # future feat
             return ads
 
         try:
@@ -292,7 +350,6 @@ class AvitoParse:
         return None
 
     def is_viewed(self, ad: Item) -> bool:
-        """Проверяет, смотрели мы это или нет"""
         return self.db_handler.record_exists(record_id=ad.id, price=ad.priceDetailed.value)
 
     @staticmethod
@@ -302,7 +359,6 @@ class AvitoParse:
         return (now - published_time) <= timedelta(seconds=max_age_seconds)
 
     def __save_viewed(self, ads: list[Item]) -> None:
-        """Сохраняет просмотренные объявления"""
         try:
             self.db_handler.add_record_from_page(ads=ads)
         except Exception as err:
