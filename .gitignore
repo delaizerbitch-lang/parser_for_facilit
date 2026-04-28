@@ -9,6 +9,6 @@ database.db
 storage/
 *.json
 cookies/
-config.toml
+.config.toml
 .env
 *.db
