@@ -1,5 +1,5 @@
 [avito]
-tg_token = "8698586206:AAFHSY1JG0k_idhGBY9smkGJk_pW4Y4golg"
+tg_token = ""
 tg_chat_id = ["784252401"]
 vk_token = ""
 vk_user_id = []
@@ -27,7 +27,7 @@ parse_views = false
 save_xlsx = false
 use_webdriver = false
 use_bypass_api = true
-cookies_api_key = "sk_live_SHpFGbVszAMPVCXhs-o8V5MvKKezcv-WYtn4LtZPS-I"
+cookies_api_key = ""
 use_own_cookies = false
 parse_phone = false
 proxy_notifier = ""
